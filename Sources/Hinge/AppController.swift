@@ -1,0 +1,188 @@
+import AppKit
+import CoreGraphics
+import SwiftUI
+
+/// Wires the sensor, the capture stream, the overlay and the settings window.
+final class AppController: NSObject, NSApplicationDelegate {
+    private let settings = Settings()
+    private let angleState = AngleState()
+    private let capture = ScreenCapture()
+    private var sensor: LidAngleSensor?
+
+    private var overlayWindow: NSWindow!
+    private var settingsWindow: NSWindow!
+    private var statusItem: NSStatusItem!
+    private var tiltView: TiltView!
+
+    private var timer: DispatchSourceTimer?
+    private var smoothedAngle: Double?
+
+    /// The overlay is only raised once the desktop actually tilts. While flat it
+    /// would be an exact copy of the screen, so hiding it changes nothing to
+    /// look at and leaves the menu bar and Dock usable.
+    private var overlayVisible = false
+    private let showAboveTilt = 1.0
+    private let hideBelowTilt = 0.2
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        guard let sensor = LidAngleSensor() else {
+            fail("No lid angle sensor found. Hinge needs an Apple silicon MacBook with a lid angle sensor.")
+            return
+        }
+        self.sensor = sensor
+
+        guard CGPreflightScreenCaptureAccess() else {
+            requestScreenRecording()
+            return
+        }
+
+        buildOverlayWindow()
+        buildSettingsWindow()
+        buildStatusItem()
+        buildMainMenu()
+
+        startSensorLoop()
+
+        capture.onFrame = { [weak self] surface in
+            DispatchQueue.main.async { self?.tiltView.show(surface) }
+        }
+        Task { @MainActor in
+            do { try await capture.start() }
+            catch { fail("Could not start screen capture: \(error.localizedDescription)") }
+        }
+
+        showSettings()
+    }
+
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+
+    /// Clicking the Dock icon brings the settings window back.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
+        showSettings()
+        return true
+    }
+
+    // MARK: - Windows
+
+    private func buildOverlayWindow() {
+        let screen = NSScreen.main ?? NSScreen.screens[0]
+        overlayWindow = NSWindow(contentRect: screen.frame, styleMask: .borderless, backing: .buffered, defer: false)
+        overlayWindow.level = .screenSaver
+        overlayWindow.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
+        overlayWindow.backgroundColor = .black
+        overlayWindow.isOpaque = true
+        // The overlay is a picture, not a surface to click; never trap input.
+        overlayWindow.ignoresMouseEvents = true
+
+        tiltView = TiltView(frame: NSRect(origin: .zero, size: screen.frame.size))
+        tiltView.autoresizingMask = [.width, .height]
+        overlayWindow.contentView = tiltView
+    }
+
+    private func buildSettingsWindow() {
+        let view = SettingsView(settings: settings, state: angleState,
+                                onUseCurrentAngle: { [weak self] in self?.useCurrentAngle() },
+                                onQuit: { NSApp.terminate(nil) })
+        let hosting = NSHostingView(rootView: view)
+        settingsWindow = NSWindow(contentRect: .zero,
+                                  styleMask: [.titled, .closable],
+                                  backing: .buffered, defer: false)
+        settingsWindow.title = "Hinge"
+        settingsWindow.contentView = hosting
+        settingsWindow.isReleasedWhenClosed = false
+        settingsWindow.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        settingsWindow.setContentSize(hosting.fittingSize)
+        settingsWindow.center()
+    }
+
+    private func buildStatusItem() {
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        statusItem.button?.image = NSImage(systemSymbolName: "laptopcomputer",
+                                          accessibilityDescription: "Hinge")
+        statusItem.button?.target = self
+        statusItem.button?.action = #selector(showSettings)
+    }
+
+    private func buildMainMenu() {
+        let appItem = NSMenuItem()
+        let appMenu = NSMenu()
+        let settingsItem = appMenu.addItem(withTitle: "Settings…", action: #selector(showSettings), keyEquivalent: ",")
+        settingsItem.target = self
+        appMenu.addItem(.separator())
+        appMenu.addItem(withTitle: "Quit Hinge", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        appItem.submenu = appMenu
+        let mainMenu = NSMenu()
+        mainMenu.addItem(appItem)
+        NSApp.mainMenu = mainMenu
+    }
+
+    @objc private func showSettings() {
+        settingsWindow.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    // MARK: - Sensor
+
+    private func startSensorLoop() {
+        let timer = DispatchSource.makeTimerSource(queue: DispatchQueue(label: "hinge.sensor"))
+        timer.schedule(deadline: .now(), repeating: .milliseconds(16))
+        timer.setEventHandler { [weak self] in
+            guard let self, let raw = self.sensor?.read() else { return }
+            let smoothed = Tilt.smooth(previous: self.smoothedAngle ?? raw, target: raw)
+            self.smoothedAngle = smoothed
+            DispatchQueue.main.async { self.render(angle: smoothed) }
+        }
+        timer.resume()
+        self.timer = timer
+    }
+
+    private func render(angle: Double) {
+        if settingsWindow.isVisible { angleState.angle = angle }
+        let tilt = Tilt.tiltDegrees(lidAngle: angle, flatAngle: settings.flatAngle)
+        setOverlay(visible: tilt > (overlayVisible ? hideBelowTilt : showAboveTilt))
+        guard overlayVisible else { return }
+        tiltView.apply(tiltDegrees: tilt, settings: settings)
+    }
+
+    private func setOverlay(visible: Bool) {
+        guard visible != overlayVisible else { return }
+        overlayVisible = visible
+        // The settings window only outranks the overlay while the overlay is up;
+        // the rest of the time it behaves like any ordinary window.
+        settingsWindow.level = visible ? .init(rawValue: NSWindow.Level.screenSaver.rawValue + 1) : .normal
+        // orderFrontRegardless keeps focus where it is.
+        if visible { overlayWindow.orderFrontRegardless() } else { overlayWindow.orderOut(nil) }
+    }
+
+    /// Treat the current lid position as the flat, full-screen angle.
+    private func useCurrentAngle() {
+        settings.flatAngle = smoothedAngle ?? settings.flatAngle
+    }
+
+    // MARK: - Failure
+
+    /// Triggers the system prompt and points the user at the right settings pane.
+    private func requestScreenRecording() {
+        CGRequestScreenCaptureAccess()
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.messageText = "Hinge needs Screen Recording permission"
+        alert.informativeText = "Turn Hinge on under Privacy & Security › Screen Recording, then open Hinge again."
+        alert.addButton(withTitle: "Open System Settings")
+        alert.addButton(withTitle: "Quit")
+        if alert.runModal() == .alertFirstButtonReturn,
+           let pane = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") {
+            NSWorkspace.shared.open(pane)
+        }
+        NSApp.terminate(nil)
+    }
+
+    private func fail(_ message: String) {
+        overlayWindow?.orderOut(nil)
+        let alert = NSAlert()
+        alert.messageText = "Hinge can't run"
+        alert.informativeText = message
+        alert.runModal()
+        NSApp.terminate(nil)
+    }
+}
