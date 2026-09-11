@@ -3,7 +3,8 @@
 ## Docs language
 
 `README.md` is written in English, overriding the usual Japanese default for
-markdown. `docs/spec.md` stays in Japanese.
+markdown. `README.ja.md` is the Japanese translation of it; keep the two in
+step when either changes. `docs/spec.md` stays in Japanese.
 
 ## After changing the transform
 
