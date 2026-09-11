@@ -29,15 +29,15 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
                 Slider(value: $settings.flatAngle, in: 45...135)
-                HStack {
-                    Text("The desktop fills the screen at this angle and above.")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Button("Use current", action: onUseCurrentAngle)
-                        .buttonStyle(.borderless)
-                        .font(.system(size: 10))
+                Text("The desktop fills the screen at this angle and above.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                Button(action: onUseCurrentAngle) {
+                    Label("Use this lid angle as full screen", systemImage: "laptopcomputer")
+                        .frame(maxWidth: .infinity)
                 }
+                .controlSize(.large)
+                .padding(.top, 6)
             }
 
             Divider()
