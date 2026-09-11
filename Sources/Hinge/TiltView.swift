@@ -70,14 +70,16 @@ final class TiltView: NSView {
 
             // ponytail: full-screen CIGaussianBlur every frame; move to a Metal
             // pass if this ever shows up as a frame-time problem.
-            let radius = Tilt.blurRadius(tiltDegrees: tiltDegrees, maxBlur: settings.blur)
+            let radius = Tilt.blurRadius(tiltDegrees: tiltDegrees, flatAngle: settings.flatAngle,
+                                         maxBlur: settings.blur)
             blurred.isHidden = radius < 0.5
             guard !blurred.isHidden else { return }
             blurred.filters = [CIFilter(name: "CIGaussianBlur", parameters: ["inputRadius": radius])]
                 .compactMap { $0 }
             // Opaque at the top edge, fading out at the frontier as it descends.
             blurMask.startPoint = CGPoint(x: 0.5, y: 1)
-            blurMask.endPoint = CGPoint(x: 0.5, y: Tilt.blurFrontier(tiltDegrees: tiltDegrees))
+            blurMask.endPoint = CGPoint(x: 0.5, y: Tilt.blurFrontier(tiltDegrees: tiltDegrees,
+                                                                    flatAngle: settings.flatAngle))
         }
     }
 

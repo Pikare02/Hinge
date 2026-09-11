@@ -42,7 +42,12 @@ struct SettingsView: View {
 
             Divider()
 
-            slider("Perspective", $settings.perspective)
+            VStack(alignment: .leading, spacing: 2) {
+                slider("Perspective", $settings.perspective)
+                Text("100% is the viewing distance calibration assumes. Lower softens it.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+            }
             slider("Max blur", $settings.blur)
             slider("Shadow", $settings.shadow)
 
