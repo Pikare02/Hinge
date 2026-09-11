@@ -96,4 +96,4 @@ Dock もそのまま使える。
 - lid angle sensor を持つ Apple silicon の MacBook
 - macOS 14 以降
 
-設計メモは [docs/spec.md](docs/spec.md) にある。
+設計メモは [docs/spec.md](docs/spec.md) にある (英語)。

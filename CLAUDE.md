@@ -2,9 +2,9 @@
 
 ## Docs language
 
-`README.md` is written in English, overriding the usual Japanese default for
-markdown. `README.ja.md` is the Japanese translation of it; keep the two in
-step when either changes. `docs/spec.md` stays in Japanese.
+This repository writes markdown in English, overriding the usual Japanese
+default. `README.ja.md` is the one exception: it is the Japanese translation of
+`README.md`, so keep the two in step whenever either changes.
 
 ## After changing the transform
 
