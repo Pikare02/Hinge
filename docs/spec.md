@@ -1,119 +1,133 @@
-# Hinge 設計仕様
+# Hinge design notes
 
-MacBook のヒンジ角度センサーを読み、キャプチャしたデスクトップを、
-開ききった姿勢のまま空間に固定されているかのように描き直す macOS アプリ。
+A macOS app that reads the MacBook lid angle sensor and redraws the captured
+desktop as though it were pinned in space, still standing at the angle where
+the lid was fully open.
 
-## 構成
+## Pieces
 
-| ファイル | 役割 |
+| File | Role |
 | --- | --- |
-| `LidAngleSensor.swift` | HID センサー (usage page 0x20 / usage 0x8A) の feature report 1 を読み、角度を度で返す |
-| `ScreenCapture.swift` | ScreenCaptureKit のストリーム。自分のアプリを除外して IOSurface フレームを配信 |
-| `Tilt.swift` | 角度 → 変換行列への純粋な写像。AppKit 非依存で自己点検できる |
-| `TiltView.swift` | 平面の描画。鮮明な複製とぼかした複製を重ね、グラデーションマスクで境界を動かす |
-| `SettingsView.swift` | 独立した設定ウィンドウ。角度表示、平らになる角度、各スライダー、完全終了ボタン |
-| `Settings.swift` | 各値を `UserDefaults` に永続化 |
-| `AppController.swift` | 全体の配線、権限確認、ウィンドウとメニューバー項目の管理 |
-| `make_icon.py` | アイコンを描いて `Resources/AppIcon.icns` を生成 |
+| `LidAngleSensor.swift` | Reads feature report 1 from the HID sensor (usage page 0x20 / usage 0x8A) and returns the angle in degrees |
+| `ScreenCapture.swift` | A ScreenCaptureKit stream that excludes this app and delivers IOSurface frames |
+| `Tilt.swift` | The pure mapping from angle to transform. Free of AppKit, so it can check itself |
+| `TiltView.swift` | Draws the plane. A sharp copy and a blurred copy, with a gradient mask moving the boundary |
+| `SettingsView.swift` | The independent settings window: angle readout, flat angle, sliders, quit button |
+| `LoginItem.swift` | The open-at-login toggle, backed by `SMAppService` |
+| `Settings.swift` | Persists each value in `UserDefaults` |
+| `AppController.swift` | Wiring, permission checks, windows, menu bar item, single-instance guard |
+| `make_icon.py` | Draws the icon and writes `Resources/AppIcon.icns` |
 
-## データの流れ
+## Data flow
 
-センサーは背景キューで 60 Hz ポーリングし、低域通過フィルタで揺れを取る。
-キャプチャは別ストリームとして 60 fps で IOSurface を渡し、レイヤーの
-`contents` に直接差し込む。どちらもメインスレッドで暗黙アニメーションを
-無効化したうえでレイヤーへ反映する。
+The sensor is polled at 60 Hz on a background queue and passed through a
+low-pass filter to take out the jitter. Capture is a separate stream handing
+over IOSurfaces at 60 fps, which go straight into the layer's `contents`. Both
+reach the layer on the main thread with implicit animation turned off.
 
-## 角度から傾きへ
+## From angle to tilt
 
-基準角度 (初期値 90 度) 以上では傾き 0。そこから蓋を閉じたぶん、
-パネルは**実際に動いたのと同じだけ**傾く。係数で減らすと、支えている
-はずの錯覚そのものが壊れるため。頭打ちは基準角度から決まり、
-min(基準角度 − 20, 55) 度。基準角度は個体差があるので固定値にせず、
-設定ウィンドウのスライダー (45〜135 度) と、現在の蓋の角度をそのまま
-基準にするボタンで合わせられるようにして保存する。
+At or above the flat angle (90 degrees by default) the tilt is zero. Below it
+the panel swings by **exactly as much as the lid moved**. Scaling that down by
+some factor would break the very illusion it is meant to hold up. The ceiling
+follows from the flat angle: min(flat − 20, 55) degrees. Sensors differ between
+machines, so the flat angle is not hard-coded; a slider (45 to 135 degrees) and
+a button that adopts the current lid angle both set it, and it is saved.
 
-## 固定された仮想ディスプレイ
+## The display that stays put
 
-蓋は下辺で回るので、その辺だけは動かない。その上のすべてを、
-「上体を起こしたままの仮想ディスプレイを見るには、視線がパネルの
-どこを通るか」で描き直す。パネルの上部は視点に近づいているので、
-同じ実寸の幅がより少ないパネル座標しか占めない。つまり**上へ行くほど
-狭く描く**と、正面から見たときに幅が変わっていないように見える。
-仮想ディスプレイの上端はパネルの外へ出るので、その分は切り落とされる。
+The lid hinges at its bottom edge, so that edge never moves. Everything above
+it is redrawn by asking where the eye would have to look to still see the
+upright display. The top of the panel has come closer to the eye, so a given
+real width covers fewer panel points up there. Drawing the image **narrower
+toward the top** is what makes the width look unchanged from the front. The top
+of the virtual display falls past the panel edge and is cut off.
 
-導出は、ヒンジを原点、y を上、z を視点方向、視点を (0, E, D)、
-パネルの傾きを Δ とすると:
+The derivation, with the hinge at the origin, y up, z toward the eye, the eye
+at (0, E, D) and the panel swung by Δ:
 
-- パネル上の点 u は (u·cosΔ, u·sinΔ) にあり、視点からその点を通る直線が
-  仮想平面 z = 0 と交わる高さは E + t(u·cosΔ − E)、ただし t = D/(D − u·sinΔ)。
-- これを u について解き、C = D·cosΔ − E·sinΔ (傾いたパネルから視点までの
-  距離) と置くと、実装している射影変換になる:
+- a panel point u sits at (u·cosΔ, u·sinΔ), and the ray from the eye through it
+  meets the virtual plane z = 0 at height E + t(u·cosΔ − E), where
+  t = D/(D − u·sinΔ);
+- solving that for u, and writing C = D·cosΔ − E·sinΔ for the eye's distance
+  from the tilted panel, gives the projective transform the code applies:
 
 ```
 x' = x / w        y' = y·(D/C) / w        w = 1 + y·sinΔ/C
 ```
 
-視点の高さ E は画面高さの半分。基準角度を決めるボタンを押した時点で、
-視線はパネルの法線と一致し画面中央を通ると仮定する。この仮定を置くと
-基準角度そのものは変換の形から消え、残る自由度は視点距離 D だけになる。
+The eye height E is half the screen height. Pressing the button that sets the
+flat angle is taken to mean the line of sight runs down the panel's normal,
+through the middle of the screen. Under that assumption the flat angle itself
+drops out of the transform, and the only degree of freedom left is the viewing
+distance D.
 
-D は自動で決まる。蓋を少し閉じた領域では仮想ディスプレイがパネル上端まで
-届かず、足りないぶんを縦の引き伸ばしで埋めることになる。その引き伸ばしを
-1% 未満に抑える条件
+## Why the viewing distance is not a taste setting
+
+D is derived. Closing the lid a little leaves the virtual display short of the
+panel's top edge, and the gap has to be covered by stretching the image
+vertically. Requiring that stretch to stay under 1% at every angle
 
 ```
 D ≥ h(½+ε)·sinΔ / (1+ε−cosΔ)
 ```
 
-を全角度で満たす最小の D を取ると、最悪値は Δ = √(2ε) ≈ 8 度で、
-D = 画面高さの 3.6 倍になる。15 インチなら約 72 cm で、実際に人が
-座っている距離とほぼ一致する。スライダーはこの自動値から遠ざける
-方向にしか動かない。近づけると引き伸ばしが目に見え始めるため。角度によっては仮想ディスプレイがパネル上端まで届かず黒帯が出るので、
-届かせるのに必要なぶんだけヒンジを中心に縦へ引き伸ばす。数 % 以内に収まる。
-横には広げない。広げると下辺が画面の左右からはみ出してしまい、
-「下辺は動かない」という前提が壊れるため。
+puts a floor under D. The worst case sits at Δ = √(2ε) ≈ 8 degrees and gives
+3.6 screen heights, about 72 cm on a 15-inch MacBook, roughly where a person
+actually sits. The slider only moves away from that value, never closer, since
+closer is where the stretch starts to show.
 
-## ぼかしの降下
+The stretch is vertical only. Widening would push the bottom edge past the
+sides of the screen, and the bottom edge must not move.
 
-ぼかしは上端から始まり、蓋を閉じるにつれて下へ降りてくる。同じフレームを
-鮮明な複製とぼかした複製の二枚重ねにし、ぼかした側に縦方向のグラデーション
-マスクを当てて、その境界を傾きに応じて下げる。ぼかしの半径も傾きに追従する
-ので、スライダーは「最大でどこまでぼかすか」を決める上限であって、
-常時かかる固定値ではない。
+## Blur descending
 
-## ウィンドウ構成と常駐
+The blur starts at the top edge and creeps down as the lid closes. The same
+frame is stacked twice, sharp and blurred, with a vertical gradient mask on the
+blurred copy whose boundary drops with the tilt. The radius follows the tilt
+too, so the slider is a ceiling on how far the blur goes, not a constant.
 
-- **オーバーレイ** — 全画面・枠なし・screenSaver レベル。`ignoresMouseEvents`
-  を立てているのでクリックを一切奪わない。
-- **設定ウィンドウ** — 独立した通常のウィンドウ。閉じてもアプリは終了せず
-  (`applicationShouldTerminateAfterLastWindowClosed` が false)、Dock アイコン
-  かメニューバー項目をクリックすると再び開く。完全終了は設定内のボタンか ⌘Q。
-- オーバーレイが出ている間だけ、設定ウィンドウをオーバーレイより上の
-  レベルに持ち上げる。普段は普通のウィンドウとして振る舞う。
+## Windows and staying resident
 
-## オーバーレイを出す条件
+- **Overlay** — full screen, borderless, screen saver level. `ignoresMouseEvents`
+  is set, so it never takes a click.
+- **Settings** — an ordinary independent window. Closing it does not quit the
+  app (`applicationShouldTerminateAfterLastWindowClosed` is false); the Dock
+  icon or the menu bar item opens it again. Quitting for real is the button in
+  settings, or Command-Q.
+- The settings window is lifted above the overlay only while the overlay is up.
+  The rest of the time it behaves like any other window.
 
-平らなときのオーバーレイは画面と同一の絵なので、傾きが付くまでは表示しない。
-これでメニューバーも Dock も普段どおり使える。境界でのちらつきを避けるため、
-傾き 1 度超で表示し 0.2 度未満で非表示にするヒステリシスを入れている。
+A second instance would capture the first one's overlay, filling the screen
+with nested copies of itself, so launching again hands over to the instance
+already running and quits.
 
-## 権限
+## When the overlay appears
 
-画面収録の権限が必要。画面を覆う前に `CGPreflightScreenCaptureAccess()` で
-確認し、未許可なら案内だけ出して終了する。センサーの読み取りに権限は要らない。
+While flat, the overlay is pixel-for-pixel the screen behind it, so it is not
+shown until there is a tilt. That leaves the menu bar and the Dock usable at
+normal angles. To stop it flickering at the boundary, it appears above 1 degree
+of tilt and disappears below 0.2.
 
-アドホック署名はビルドのたびにハッシュが変わり、許可済みの記録が無効になる。
-`make_app.sh` は署名後に `tccutil reset` で古い記録を消し、次回起動で
-きちんと聞き直させる。
+## Permission
 
-## 検証
+Screen Recording is required. `CGPreflightScreenCaptureAccess()` is checked
+before anything covers the screen; if it has not been granted, the app explains
+where to grant it and quits. Reading the sensor needs no permission.
 
-- `Hinge --selfcheck` — 傾きの写像、下辺の固定、上へ行くほど狭くなること、
-  どの角度でも黒帯が出ないこと、拡大が数 % に収まること、ぼかしの降下
-- `Hinge --probe` — 実機のセンサー角度と画面収録権限の状態
+An ad-hoc signature changes hash on every build, which invalidates the existing
+grant while it still shows as enabled. `make_app.sh` clears the stale record
+with `tccutil reset` after signing, so the next launch asks properly.
 
-## 既知の制限
+## Checks
 
-- 全画面 `CIGaussianBlur` を毎フレーム適用している。フレーム時間が問題に
-  なったら Metal のパスに移す (`ponytail:` コメントを該当箇所に記載)。
-- 対応はメインディスプレイのみ。
+- `Hinge --selfcheck` — the angle mapping, the fixed bottom edge, narrowing
+  toward the top, no black band at any angle, the stretch staying near 1%, and
+  the blur descending
+- `Hinge --probe` — the live lid angle and the permission state
+
+## Known limits
+
+- A full-screen `CIGaussianBlur` runs every frame. If frame time ever becomes a
+  problem, move it to a Metal pass (there is a `ponytail:` comment at the spot).
+- The main display only.

@@ -98,4 +98,4 @@ no black band ever appears, and the stretch stays near 1%.
 - An Apple silicon MacBook with a lid angle sensor
 - macOS 14 or later
 
-The design notes are in [docs/spec.md](docs/spec.md), in Japanese.
+The design notes are in [docs/spec.md](docs/spec.md).
