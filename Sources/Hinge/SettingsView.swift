@@ -53,6 +53,8 @@ struct SettingsView: View {
 
             Divider()
 
+            LoginItemToggle()
+
             HStack {
                 Text("Closing this window leaves Hinge running.")
                     .font(.system(size: 10))
