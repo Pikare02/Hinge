@@ -43,8 +43,10 @@ enum Tilt {
     }
 
     /// The virtual display does not always reach the top of the tilted panel.
-    /// Scaling it up by this much, about the hinge, keeps the panel covered
-    /// instead of leaving a black band. It stays within a few percent.
+    /// Stretching it upward by this much, about the hinge, keeps the panel
+    /// covered instead of leaving a black band. It stays within a few percent,
+    /// and it is deliberately vertical only: widening it would push the bottom
+    /// edge past the sides of the screen, and that edge must not move.
     static func overscan(tiltDegrees: Double, perspective: Double, screenHeight h: Double) -> Double {
         let (d, c, sinT) = geometry(tiltDegrees: tiltDegrees, perspective: perspective, screenHeight: h)
         return max(1, c / (d - h * sinT))
@@ -62,7 +64,6 @@ enum Tilt {
         let (d, c, sinT) = geometry(tiltDegrees: tiltDegrees, perspective: perspective, screenHeight: h)
         let s = overscan(tiltDegrees: tiltDegrees, perspective: perspective, screenHeight: h)
         var t = CATransform3DIdentity
-        t.m11 = s
         t.m22 = s * d / c
         t.m24 = s * sinT / c
         return t
@@ -122,7 +123,8 @@ enum Tilt {
 
                 // The hinge is fixed: the bottom edge never moves or resizes.
                 assert(abs(bottom.y) < 1e-9, "the bottom edge must stay on the hinge")
-                assert(bottom.widthScale >= 1, "the bottom edge must stay at least full width")
+                assert(bottom.widthScale == 1,
+                       "the bottom edge must stay exactly full width at tilt \(tilt)")
 
                 // Higher up the panel is nearer the eye, so it must be drawn narrower.
                 assert(top.widthScale <= bottom.widthScale + 1e-12,
