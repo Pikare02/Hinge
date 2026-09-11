@@ -1,48 +1,99 @@
 # Hinge
 
-<img src="docs/icon-preview.png" width="96" alt="Hinge のアイコン">
+<img src="docs/icon-preview.png" width="96" alt="The Hinge icon">
 
-MacBook の蓋を閉じていくと、デスクトップがその場に立ったまま残っているように
-見せる macOS アプリ。物理パネルは手前に倒れてくるが、画面に描かれた内容は
-開ききった姿勢のまま空間に固定されているように振る舞う。
+Close your MacBook a little and the desktop stays where it was. The panel
+swings toward you, but what is drawn on it is redrawn so the display reads as
+standing still in the room, upright at the angle you calibrated.
 
-## ビルド
+## How it works
+
+The lid angle comes from the internal HID sensor on Apple silicon MacBooks
+(usage page `0x20`, usage `0x8A`), polled at 60 Hz. ScreenCaptureKit streams
+the desktop, with Hinge's own windows excluded. Each frame is drawn through a
+projective transform built from three things: the hinge, the panel angle, and
+where your eye is.
+
+The hinge is the bottom edge, so that edge never moves and always spans the
+full width. Everything above it is placed where your eye would have to look to
+still see the upright display. The top of the panel has come closer to you, so
+a given real width covers fewer points up there, and the image is drawn
+narrower toward the top. The top of the virtual display falls past the panel
+edge and is cut off, the way it would be in the room.
+
+Calibration assumes you are looking straight down the panel's normal, through
+the middle of the screen. Under that assumption the calibrated angle drops out
+of the transform, and the only free parameter left is how far away you sit.
+
+That distance is derived rather than guessed. Closing the lid a little leaves
+the virtual display short of the panel's top edge, and the gap has to be
+covered by stretching the image. Requiring that stretch to stay under 1% at
+every angle puts a floor under the distance:
+
+```
+D ≥ h(½+ε)·sinΔ / (1+ε−cosΔ)
+```
+
+The worst case sits at Δ = √(2ε) ≈ 8°, which gives 3.6 screen heights. On a
+15-inch MacBook that is about 72 cm, roughly where a person actually sits.
+
+Blur starts at the top edge and creeps down as the lid closes. Two copies of
+the same frame are stacked, sharp and blurred, and a gradient mask on the
+blurred one moves the boundary.
+
+## Build
 
 ```
 ./make_app.sh
 ```
 
-`Hinge.app` ができる。Swift Package Manager でビルドしたバイナリを .app に
-包み、アドホック署名する。Xcode プロジェクトは使わない。
+This produces `Hinge.app`: a Swift Package Manager binary wrapped in a bundle
+and ad-hoc signed. There is no Xcode project.
 
-## 実行
+## Run
 
 ```
 open Hinge.app
 ```
 
-画面収録の権限が要る。初回起動時に案内が出るので、
-システム設定 → プライバシーとセキュリティ → 画面収録 で許可して開き直す。
+Hinge needs Screen Recording permission. The first launch explains where to
+grant it, in System Settings under Privacy & Security, and then you reopen it.
 
-アドホック署名はビルドのたびにハッシュが変わり、許可が無効になる。
-`make_app.sh` は古い許可を消してから終わるので、再ビルド後は一度許可し直す。
+An ad-hoc signature changes hash on every build, which invalidates the
+permission while still showing as enabled. `make_app.sh` clears the stale
+grant, so allow Hinge again after each rebuild.
 
-Hinge は常駐する。設定ウィンドウは Dock アイコンかメニューバーの項目から開き、
-閉じてもアプリは動き続ける。終了は設定内のボタンか ⌘Q。
+Hinge runs in the background. The settings window opens from the Dock icon or
+the menu bar item, and closing it leaves the app running. Quit from the button
+in settings or with Command-Q. A second copy will not start; it hands over to
+the one already running.
 
-オーバーレイは傾きが付いたときだけ出るので、普段の角度ではメニューバーも
-Dock もそのまま使える。
+The overlay only appears once the desktop tilts, so the menu bar and Dock stay
+usable at normal lid angles.
 
-## 画面を覆わずに動作を確かめる
+## Settings
+
+- **Flat above** — the lid angle at and above which the desktop fills the
+  screen. One button sets it to wherever the lid is right now.
+- **Perspective** — 100% is the derived viewing distance. Lower backs away from
+  it and softens the correction. It never moves closer.
+- **Max blur** and **Shadow** — how far each goes at the end of the travel.
+- **Open Hinge at login**.
+
+## Checking it without taking over the screen
 
 ```
-.build/release/Hinge --selfcheck   # 変換の数式
-.build/release/Hinge --probe       # 実機の蓋の角度と権限の状態
+.build/release/Hinge --selfcheck   # the transform, angle by angle
+.build/release/Hinge --probe       # live lid angle and permission state
 ```
 
-## 必要なもの
+`--selfcheck` asserts the things that are easy to break by accident: the bottom
+edge stays exactly full width at every angle, the image narrows toward the top,
+no black band ever appears, and the stretch stays near 1%.
 
-- lid angle sensor を持つ Apple silicon の MacBook
-- macOS 14 以降
+## Requirements
 
-設計は [docs/spec.md](docs/spec.md) にある。
+- An Apple silicon MacBook with a lid angle sensor
+- macOS 14 or later
+
+The design notes are in [docs/spec.md](docs/spec.md), in Japanese.

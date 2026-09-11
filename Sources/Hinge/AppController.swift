@@ -25,6 +25,14 @@ final class AppController: NSObject, NSApplicationDelegate {
     private let hideBelowTilt = 0.2
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Two copies would each capture the other's overlay, and the screen
+        // would fill with nested copies of itself.
+        if let running = alreadyRunning() {
+            running.activate()
+            NSApp.terminate(nil)
+            return
+        }
+
         guard let sensor = LidAngleSensor() else {
             fail("No lid angle sensor found. Hinge needs an Apple silicon MacBook with a lid angle sensor.")
             return
@@ -60,6 +68,13 @@ final class AppController: NSObject, NSApplicationDelegate {
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
         showSettings()
         return true
+    }
+
+    /// Another instance of this app, if one is already up.
+    private func alreadyRunning() -> NSRunningApplication? {
+        let identifier = Bundle.main.bundleIdentifier ?? "local.hinge"
+        return NSRunningApplication.runningApplications(withBundleIdentifier: identifier)
+            .first { $0.processIdentifier != ProcessInfo.processInfo.processIdentifier }
     }
 
     // MARK: - Windows
