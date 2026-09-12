@@ -11,7 +11,8 @@ MacBook の蓋を少し閉じても、デスクトップはその場に残る。
 ## しくみ
 
 蓋の角度は Apple silicon の MacBook が内蔵する HID センサー
-(usage page `0x20`、usage `0x8A`) から 60 Hz で読む。デスクトップは
+(usage page `0x20`、usage `0x8A`) から、表示の 1 フレームにつき 1 回、
+display link に載せて読む。デスクトップは
 ScreenCaptureKit で受け取り、Hinge 自身のウィンドウは除外する。
 各フレームは、ヒンジ・パネルの角度・視点の位置という三つから組み立てた
 射影変換を通して描かれる。

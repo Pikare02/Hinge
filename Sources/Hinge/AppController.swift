@@ -16,7 +16,8 @@ final class AppController: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var tiltView: TiltView!
 
-    private var timer: DispatchSourceTimer?
+    private var displayLink: CADisplayLink?
+    private var lastTick: CFTimeInterval?
     private var confirmation: DispatchWorkItem?
     private var updateTimer: Timer?
     private var smoothedAngle: Double?
@@ -157,17 +158,26 @@ final class AppController: NSObject, NSApplicationDelegate {
 
     // MARK: - Sensor
 
+    /// The lid is read once per displayed frame, locked to the display. A timer
+    /// of its own would drift against the refresh and land halfway through a
+    /// frame, which costs up to another frame before the panel shows the angle.
+    /// The read itself is under a millisecond, so it can sit on the main thread
+    /// where the drawing already is.
     private func startSensorLoop() {
-        let timer = DispatchSource.makeTimerSource(queue: DispatchQueue(label: "hinge.sensor"))
-        timer.schedule(deadline: .now(), repeating: .milliseconds(16))
-        timer.setEventHandler { [weak self] in
-            guard let self, let raw = self.sensor?.read() else { return }
-            let smoothed = Tilt.smooth(previous: self.smoothedAngle ?? raw, target: raw)
-            self.smoothedAngle = smoothed
-            DispatchQueue.main.async { self.render(angle: smoothed) }
-        }
-        timer.resume()
-        self.timer = timer
+        let screen = overlayWindow.screen ?? NSScreen.main ?? NSScreen.screens[0]
+        let link = screen.displayLink(target: self, selector: #selector(tick))
+        link.add(to: .main, forMode: .common)
+        displayLink = link
+    }
+
+    @objc private func tick() {
+        guard let raw = sensor?.read() else { return }
+        let now = CACurrentMediaTime()
+        let dt = lastTick.map { now - $0 } ?? 0
+        lastTick = now
+        let smoothed = Tilt.smooth(previous: smoothedAngle ?? raw, target: raw, dt: dt)
+        smoothedAngle = smoothed
+        render(angle: smoothed)
     }
 
     private func render(angle: Double) {
