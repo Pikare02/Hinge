@@ -1,7 +1,5 @@
 # Hinge
 
-English · [日本語](README.ja.md)
-
 <img src="docs/icon-preview.png" width="96" alt="The Hinge icon">
 
 Close your MacBook a little and the desktop stays where it was. The panel
