@@ -20,10 +20,21 @@ the lid was fully open.
 
 ## Data flow
 
-The sensor is polled at 60 Hz on a background queue and passed through a
-low-pass filter to take out the jitter. Capture is a separate stream handing
-over IOSurfaces at 60 fps, which go straight into the layer's `contents`. Both
-reach the layer on the main thread with implicit animation turned off.
+The sensor is read once per displayed frame, on a display link, on the main
+thread. A timer of its own drifts against the refresh and lands halfway through
+a frame, which costs up to another frame before the panel shows the angle; the
+read is under a millisecond, so it sits where the drawing already is.
+
+The reading passes through a low-pass filter with a 25 ms time constant,
+written against elapsed time rather than frames so a display of any rate
+behaves the same. The filter is not there for jitter: the sensor reports whole
+degrees and holds them without a flicker. It is there to round off the
+one-degree steps as the lid crosses them, and every millisecond past that is
+the panel arriving late.
+
+Capture is a separate stream handing over IOSurfaces at 60 fps, which go
+straight into the layer's `contents`. Both reach the layer on the main thread
+with implicit animation turned off.
 
 ## From angle to tilt
 

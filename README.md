@@ -11,7 +11,8 @@ standing still in the room, upright at the angle you calibrated.
 ## How it works
 
 The lid angle comes from the internal HID sensor on Apple silicon MacBooks
-(usage page `0x20`, usage `0x8A`), polled at 60 Hz. ScreenCaptureKit streams
+(usage page `0x20`, usage `0x8A`), read once per displayed frame on a display
+link. ScreenCaptureKit streams
 the desktop, with Hinge's own windows excluded. Each frame is drawn through a
 projective transform built from three things: the hinge, the panel angle, and
 where your eye is.

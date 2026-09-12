@@ -98,9 +98,18 @@ enum Tilt {
         progress(tiltDegrees: tiltDegrees, flatAngle: flatAngle) * clamp01(maxBlur) * 24
     }
 
-    /// Low-pass filter that takes the jitter out of the raw sensor reading.
-    static func smooth(previous: Double, target: Double, factor: Double = 0.25) -> Double {
-        previous + (target - previous) * factor
+    /// How long the smoothing takes to close most of a gap. The sensor reports
+    /// whole degrees and holds them without a flicker, so the filter is only
+    /// rounding off the one-degree steps as the lid crosses them. Every
+    /// millisecond past that is the panel arriving late.
+    static let smoothingTime = 0.025
+
+    /// Low-pass filter on the raw reading, written against elapsed time rather
+    /// than frames so the panel behaves the same on a display of any rate.
+    static func smooth(previous: Double, target: Double, dt: Double,
+                       tau: Double = smoothingTime) -> Double {
+        guard dt > 0, tau > 0 else { return target }
+        return previous + (target - previous) * (1 - exp(-dt / tau))
     }
 
     static func clamp01(_ v: Double) -> Double { min(max(v, 0), 1) }
@@ -179,9 +188,21 @@ enum Tilt {
         assert(blurRadius(tiltDegrees: 0, flatAngle: 90, maxBlur: 1) == 0, "a flat desktop must stay sharp")
         assert(blurRadius(tiltDegrees: 30, flatAngle: 90, maxBlur: 0) == 0, "a zeroed slider must stay sharp")
 
+        // Smoothing converges, never overshoots, and lands in the same place
+        // whatever rate it is stepped at: twice the frames, half the step.
         var v = 0.0
-        for _ in 0..<200 { v = smooth(previous: v, target: 90) }
+        for _ in 0..<200 { v = smooth(previous: v, target: 90, dt: 1.0 / 60) }
         assert(abs(v - 90) < 0.01, "smoothing must converge on the target")
+        assert(v <= 90, "smoothing must not overshoot the target")
+        var slow = 0.0, fast = 0.0
+        for _ in 0..<6 { slow = smooth(previous: slow, target: 90, dt: 1.0 / 60) }
+        for _ in 0..<12 { fast = smooth(previous: fast, target: 90, dt: 1.0 / 120) }
+        assert(abs(slow - fast) < 0.01, "the same elapsed time must give the same angle at any frame rate")
+        assert(smooth(previous: 0, target: 90, dt: 0) == 90, "a first reading must be taken as-is")
+        // What the filter costs: most of a one-degree step is gone within a
+        // couple of frames, which is what keeps it from feeling delayed.
+        let step = smooth(previous: 0, target: 1, dt: 2.0 / 60)
+        assert(step > 0.7, "a one-degree step must be most of the way home in two frames, got \(step)")
         assert(clamp01(-1) == 0 && clamp01(2) == 1, "clamp01 must bound both ends")
         print("Tilt.selfCheck passed")
     }
