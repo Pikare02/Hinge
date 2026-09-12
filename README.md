@@ -77,16 +77,43 @@ usable at normal lid angles.
 
 - **Flat above** — the lid angle at and above which the desktop fills the
   screen. One button sets it to wherever the lid is right now.
+- **Shortcut** — a system-wide key that does the same thing from any app, so
+  you can calibrate sitting the way you normally sit. It is ⌃⌥⌘H until you
+  click the binding and press something else. The menu bar shows the angle it
+  landed on for a moment. A binding needs Control, Option or Command; a bare
+  key would be swallowed everywhere.
 - **Perspective** — 100% is the derived viewing distance. Lower backs away from
   it and softens the correction. It never moves closer.
 - **Max blur** and **Shadow** — how far each goes at the end of the travel.
 - **Open Hinge at login**.
+- **Install updates automatically** — off by default. On, a newer release is
+  downloaded and put in place as soon as it is found, and Hinge restarts into
+  it. Off, the button says which version is waiting and installs it when asked.
+
+## Updates
+
+Hinge asks GitHub for the latest release of
+[Pikare02/Hinge](https://github.com/Pikare02/Hinge) at launch and every six
+hours. A release is treated as an update when its tag, with any `v` stripped,
+is a higher version than the bundle's own. The release must carry a zip of
+`Hinge.app` as an asset; that zip is unpacked with `ditto`, checked for an
+executable inside, and swapped in where the running copy sits. A failure at any
+step leaves the installed copy alone.
+
+Two things follow from Hinge being ad-hoc signed rather than signed with a
+Developer ID. The signature hash changes with every build, so an update
+invalidates the Screen Recording grant and the new copy asks for it again;
+automatic updates therefore leave Hinge waiting on that prompt rather than
+running. And the only thing standing behind an update is HTTPS to GitHub and
+whoever can publish to that repository. Signing properly would fix both.
+
 
 ## Checking it without taking over the screen
 
 ```
 .build/release/Hinge --selfcheck   # the transform, angle by angle
 .build/release/Hinge --probe       # live lid angle and permission state
+.build/release/Hinge --hotkey      # the current shortcut, and whether it registered
 ```
 
 `--selfcheck` asserts the things that are easy to break by accident: the bottom

@@ -6,6 +6,10 @@ cd "$(dirname "$0")"
 
 CONFIG="${1:-release}"
 APP="Hinge.app"
+# The updater compares GitHub's release tag against this, so a build that is
+# not on a tag must not claim to be the tagged version.
+VERSION="$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || true)"
+VERSION="${VERSION:-1.0}"
 
 python3 make_icon.py >/dev/null
 swift build -c "$CONFIG"
@@ -16,7 +20,7 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/Hinge"
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 
-cat > "$APP/Contents/Info.plist" <<'PLIST'
+cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -26,8 +30,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
     <key>CFBundleExecutable</key><string>Hinge</string>
     <key>CFBundleIdentifier</key><string>local.hinge</string>
     <key>CFBundleIconFile</key><string>AppIcon</string>
-    <key>CFBundleVersion</key><string>1.0</string>
-    <key>CFBundleShortVersionString</key><string>1.0</string>
+    <key>CFBundleVersion</key><string>$VERSION</string>
+    <key>CFBundleShortVersionString</key><string>$VERSION</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>LSMinimumSystemVersion</key><string>14.0</string>
     <key>NSHighResolutionCapable</key><true/>
@@ -42,5 +46,5 @@ codesign --force --sign - "$APP"
 # means the next launch asks again instead of silently failing.
 tccutil reset ScreenCapture local.hinge >/dev/null 2>&1 || true
 
-echo "built $(pwd)/$APP"
+echo "built $(pwd)/$APP (version $VERSION)"
 echo "Screen Recording permission was reset; allow Hinge again on next launch."

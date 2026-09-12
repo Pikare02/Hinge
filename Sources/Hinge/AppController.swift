@@ -7,6 +7,8 @@ final class AppController: NSObject, NSApplicationDelegate {
     private let settings = Settings()
     private let angleState = AngleState()
     private let capture = ScreenCapture()
+    // Created on the main thread, which is where the delegate callbacks run.
+    private lazy var updater = MainActor.assumeIsolated { Updater() }
     private var sensor: LidAngleSensor?
 
     private var overlayWindow: NSWindow!
@@ -15,6 +17,8 @@ final class AppController: NSObject, NSApplicationDelegate {
     private var tiltView: TiltView!
 
     private var timer: DispatchSourceTimer?
+    private var confirmation: DispatchWorkItem?
+    private var updateTimer: Timer?
     private var smoothedAngle: Double?
 
     /// The overlay is only raised once the desktop actually tilts. While flat it
@@ -51,6 +55,8 @@ final class AppController: NSObject, NSApplicationDelegate {
 
         startSensorLoop()
 
+        settings.bindHotkey { [weak self] in self?.useCurrentAngle() }
+
         capture.onFrame = { [weak self] surface in
             DispatchQueue.main.async { self?.tiltView.show(surface) }
         }
@@ -59,7 +65,20 @@ final class AppController: NSObject, NSApplicationDelegate {
             catch { fail("Could not start screen capture: \(error.localizedDescription)") }
         }
 
+        startUpdateChecks()
+
         showSettings()
+    }
+
+    /// Looks for a release now and every six hours after. Only the automatic
+    /// setting lets a find install itself; otherwise it waits in settings.
+    private func startUpdateChecks() {
+        let check = { [weak self] in
+            guard let self else { return }
+            Task { await self.updater.check(install: self.settings.autoUpdate) }
+        }
+        check()
+        updateTimer = Timer.scheduledTimer(withTimeInterval: 6 * 3600, repeats: true) { _ in check() }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
@@ -95,7 +114,7 @@ final class AppController: NSObject, NSApplicationDelegate {
     }
 
     private func buildSettingsWindow() {
-        let view = SettingsView(settings: settings, state: angleState,
+        let view = SettingsView(settings: settings, state: angleState, updater: updater,
                                 onUseCurrentAngle: { [weak self] in self?.useCurrentAngle() },
                                 onQuit: { NSApp.terminate(nil) })
         let hosting = NSHostingView(rootView: view)
@@ -172,6 +191,18 @@ final class AppController: NSObject, NSApplicationDelegate {
     /// Treat the current lid position as the flat, full-screen angle.
     private func useCurrentAngle() {
         settings.flatAngle = smoothedAngle ?? settings.flatAngle
+        confirmCalibration()
+    }
+
+    /// The shortcut works with every window hidden, so the new angle is shown
+    /// in the menu bar for a moment; otherwise nothing on screen would change.
+    private func confirmCalibration() {
+        guard let button = statusItem?.button else { return }
+        button.title = String(format: " %.0f°", settings.flatAngle)
+        confirmation?.cancel()
+        let work = DispatchWorkItem { button.title = "" }
+        confirmation = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5, execute: work)
     }
 
     // MARK: - Failure
