@@ -3,8 +3,8 @@
 ## Docs language
 
 This repository writes markdown in English, overriding the usual Japanese
-default. `README.ja.md` is the one exception: it is the Japanese translation of
-`README.md`, so keep the two in step whenever either changes.
+default. That holds for every file: README, design notes, and anything added
+later.
 
 ## After changing the transform
 
